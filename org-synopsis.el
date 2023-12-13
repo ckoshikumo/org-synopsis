@@ -92,7 +92,7 @@
     (org-synopsis-mode 1))
   (org-synopsis--remove-all)
   (goto-char (point-min))
-  (unless (bobp) (outline-next-heading)))
+  (unless (org-at-heading-p) (outline-next-heading)))
 
 (defun org-synopsis--synopsis-and-text ()
   (interactive)
