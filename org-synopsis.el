@@ -27,47 +27,67 @@
     (advice-remove 'org-cycle-internal-local #'org-synopsis--before-org-cycle-local)
     (org-synopsis--remove-all)))
 
-(defun org-synopsis-pop ()
-  (interactive)
+(defun org-synopsis-prepare-pop ()
   (let* ((synopsis-buffer-name (concat "*synopsis: " (buffer-name) "*"))
-         (synopsis-buffer (or (get-buffer synopsis-buffer-name)
-                              (make-indirect-buffer (buffer-name) synopsis-buffer-name t t)))
-         (orig-pt (point))
+         (synopsis-buffer
+          (or (get-buffer synopsis-buffer-name)
+              (make-indirect-buffer (buffer-name) synopsis-buffer-name t t)))
          main-window synopsis-window)
-
-    (if (setq synopsis-window (get-window-with-predicate
-                               (lambda (win)
-                                 (string= (buffer-name (window-buffer win)) synopsis-buffer-name))))
+    (if (setq synopsis-window
+              (get-window-with-predicate
+               (lambda (win)
+                 (string= (buffer-name (window-buffer win)) synopsis-buffer-name))))
         (setq main-window (selected-window))
       (split-window-right 60)
       (setq synopsis-window (selected-window))
       (other-window 1)
       (setq main-window (selected-window)))
-
     (select-window synopsis-window)
     (switch-to-buffer synopsis-buffer)
-
     (widen)
     (org-fold-show-all '(headings drawers))
     (org-synopsis--remove-all)
+    main-window))
+
+(defun org-synopsis-pop-all ()
+  (interactive)
+  (org-synopsis-mode 1)
+  (let ((orig-pt (point))
+        (main-win (org-synopsis-prepare-pop)))
+
+    (org-synopsis--synopsis-only 'pop)
+    (goto-char (point-min))
+    (outline-next-heading)
+    (unless (bobp) (forward-line -1))
+    (let ((ov (make-overlay (point-min) (pos-eol) nil t)))
+      (overlay-put ov 'org-synopsis t)
+      (overlay-put ov 'invisible 'org-synopsis)
+      (overlay-put ov 'modification-hooks '(org-synopsis-delete-overlay-if-changed)))
+
+    (goto-char orig-pt)
+    (recenter-top-bottom)
+    (select-window main-win)))
+
+(defun org-synopsis-pop ()
+  (interactive)
+  (org-synopsis-mode 1)
+  (let ((orig-pt (point))
+        (main-win (org-synopsis-prepare-pop))
+        (case-fold-search t))
+
     (goto-char orig-pt)
     (org-back-to-heading)
-    (let ((case-fold-search t))
-      (search-forward ":synopsis:" nil t)
-      (let* ((drawer (org-element-at-point-no-context (pos-bol)))
-             (positions (org-synopsis--get-positions drawer)))
-        (org-synopsis--hide-above positions)
-        (org-synopsis--paint-background positions)
-        (org-synopsis--hide-below positions)))
+    (search-forward ":synopsis:" nil t)
+    (let* ((drawer (org-element-at-point-no-context (pos-bol)))
+           (positions (org-synopsis--get-positions drawer)))
+      ;; (org-synopsis--hide-beg-line positions)
+      (org-synopsis--hide-above positions)
+      (org-synopsis--paint-background positions)
+      (org-synopsis--hide-below positions))
+
     (org-narrow-to-subtree)
-    (fit-window-to-buffer)
     (goto-char (point-min))
-
-    (when (and (fboundp 'hide-mode-line-mode)
-               (not (bound-and-true-p hide-mode-line-mode)))
-      (hide-mode-line-mode 1))
-
-    (select-window main-window)))
+    (select-window main-win)))
 
 (defun org-synopsis-insert-drawer ()
   (interactive)
@@ -79,8 +99,7 @@
 (defun org-synopsis-cycle ()
   (interactive)
   (save-excursion
-    (unless org-synopsis-mode
-      (org-synopsis-mode 1))
+    (org-synopsis-mode 1)
     (if (not (eq last-command this-command))
         (progn (org-synopsis--synopsis-only))
       (cond ((eq org-synopsis--status 'synopsis)
@@ -118,11 +137,12 @@
         (let ((positions (org-synopsis--get-positions drawer)))
           (org-synopsis--open-drawer positions)
           (org-synopsis--hide-above positions)
+          ;; (org-synopsis--hide-beg-line positions)
           (org-synopsis--hide-end-line positions)
           (org-synopsis--paint-background positions)
           (outline-next-heading))))))
 
-(defun org-synopsis--synopsis-only ()
+(defun org-synopsis--synopsis-only (&optional pop)
   (interactive)
   (setq org-synopsis--status 'synopsis)
   (org-cycle-overview)
@@ -136,9 +156,10 @@
             (org-back-to-heading)
             (outline-show-entry))
           (org-synopsis--open-drawer positions)
-          (org-synopsis--hide-above positions)
+          ;; (org-synopsis--hide-beg-line positions)
+          (org-synopsis--hide-above positions pop)
           (org-synopsis--paint-background positions)
-          (org-synopsis--hide-below positions)
+          (org-synopsis--hide-below positions pop)
           (outline-next-heading))))))
 
 (defun org-synopsis--remove-all (&optional beg end)
@@ -161,8 +182,7 @@
          below-beg below-end )
     (save-excursion
       (org-back-to-heading)
-      (forward-line 1)
-      (setq above-beg (point))
+      (setq above-beg (1+ (pos-eol)))
 
       (goto-char (org-element-property :begin drawer))
       (setq above-end (1+ (pos-eol))
@@ -180,23 +200,24 @@
       (setq below-end (1+ (pos-eol))))
 
     `( :above-beg ,above-beg :above-end ,above-end
-       :end-line-beg ,end-line-beg :end-line-end ,end-line-end
        :content-beg ,content-beg :content-end ,content-end
+       :end-line-beg ,end-line-beg :end-line-end ,end-line-end
        :below-beg ,below-beg :below-end ,below-end )))
 
 (defun org-synopsis--open-drawer (pos)
   (save-excursion
-    (goto-char (plist-get pos :above-end))
+    (goto-char (plist-get pos :end-line-beg))
     (org-fold-hide-drawer-toggle 'off t)))
 
-(defun org-synopsis--hide-above (pos)
-  (let ((ov (make-overlay (plist-get pos :above-beg) (plist-get pos :above-end) nil t)))
+(defun org-synopsis--hide-above (pos &optional pop)
+  (let ((ov (if pop (make-overlay (plist-get pos :above-beg) (plist-get pos :above-end) nil nil t)
+              (make-overlay (plist-get pos :above-beg) (plist-get pos :above-end) nil nil t))))
     (overlay-put ov 'org-synopsis t)
     (overlay-put ov 'invisible 'org-synopsis)
     (overlay-put ov 'modification-hooks '(org-synopsis-delete-overlay-if-changed))))
 
-(defun org-synopsis--hide-end-line (pos)
-  (let ((ov (make-overlay (plist-get pos :end-line-beg) (plist-get pos :end-line-end) nil t)))
+(defun org-synopsis--hide-beg-line (pos)
+  (let ((ov (make-overlay (plist-get pos :beg-line-beg) (plist-get pos :beg-line-end) nil nil t)))
     (overlay-put ov 'org-synopsis t)
     (overlay-put ov 'invisible 'org-synopsis)
     (overlay-put ov 'modification-hooks '(org-synopsis-delete-overlay-if-changed))))
@@ -206,8 +227,15 @@
     (overlay-put ov 'org-synopsis t)
     (overlay-put ov 'face `(:background ,org-synopsis-bg-color :extend t))))
 
-(defun org-synopsis--hide-below (pos)
-  (let ((ov (make-overlay (plist-get pos :below-beg) (plist-get pos :below-end) nil t)))
+(defun org-synopsis--hide-end-line (pos)
+  (let ((ov (make-overlay (plist-get pos :end-line-beg) (plist-get pos :end-line-end) nil t)))
+    (overlay-put ov 'org-synopsis t)
+    (overlay-put ov 'invisible 'org-synopsis)
+    (overlay-put ov 'modification-hooks '(org-synopsis-delete-overlay-if-changed))))
+
+(defun org-synopsis--hide-below (pos &optional pop)
+  (let ((ov (if pop (make-overlay (plist-get pos :below-beg) (plist-get pos :below-end) nil nil t)
+              (make-overlay (plist-get pos :below-beg) (plist-get pos :below-end) nil t))))
     (overlay-put ov 'org-synopsis t)
     (overlay-put ov 'invisible 'org-synopsis)
     (overlay-put ov 'modification-hooks '(org-synopsis-delete-overlay-if-changed))))
