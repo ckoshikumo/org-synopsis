@@ -102,7 +102,7 @@
     (unless (org-at-heading-p) (outline-next-heading))
     (unless (bobp) (forward-line -1))
 
-    (let ((ov (make-overlay (point-min) (pos-eol) nil t)))
+    (let ((ov (make-overlay (point-min) (1+ (pos-eol)) nil t)))
       (overlay-put ov 'org-synopsis t)
       (overlay-put ov 'invisible 'org-synopsis)
       (overlay-put ov 'modification-hooks '(org-synopsis--delete-overlay-if-changed)))
