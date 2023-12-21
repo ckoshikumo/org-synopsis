@@ -174,7 +174,7 @@
 (defun org-synopsis--paint (beg end &optional folded)
   (let ((ov (make-overlay beg end nil nil t)))
     (overlay-put ov 'org-synopsis t)
-    (overlay-put ov 'face '(:background "#2e2e3c" :extend t))
+    (overlay-put ov 'face `(:background ,org-synopsis-bg-color :extend t))
     (overlay-put ov 'org-folded folded)))
 
 (defun org-synopsis--before-org-cycle-global (&rest _)
